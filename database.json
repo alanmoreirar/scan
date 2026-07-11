@@ -1,0 +1,40 @@
+{
+  "products": [],
+  "movements": [],
+  "inventory": [],
+  "logs": [
+    {
+      "id": "log_init",
+      "timestamp": "2026-07-11T23:43:00.140Z",
+      "message": "Banco de dados do servidor Caninana inicializado com sucesso.",
+      "type": "success",
+      "user": "Sistema"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "name": "Carlos Caninana",
+      "role": "Administrador",
+      "email": "carlos@caninana.com.br",
+      "avatar": "",
+      "passwordHash": "123"
+    },
+    {
+      "username": "operador",
+      "name": "Thiago Silva",
+      "role": "Operador",
+      "email": "thiago@caninana.com.br",
+      "avatar": "",
+      "passwordHash": "123"
+    },
+    {
+      "username": "consulta",
+      "name": "Juliana Santos",
+      "role": "Consulta",
+      "email": "juliana@caninana.com.br",
+      "avatar": "",
+      "passwordHash": "123"
+    }
+  ]
+}

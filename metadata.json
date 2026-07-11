@@ -1,0 +1,10 @@
+{
+  "name": "Caninana Coletor",
+  "description": "Progressive Web App (PWA) de coleta de dados profissional de estoque para a Caninana Auto Vidros.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

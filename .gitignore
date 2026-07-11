@@ -1,0 +1,20 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Android specific exclusions
+.gradle/
+android/.gradle/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.iml
+.externalNativeBuild/
+.cxx/
+local.properties
