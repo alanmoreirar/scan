@@ -27,6 +27,7 @@ import QueryTab from './components/QueryTab';
 import ConfigTab from './components/ConfigTab';
 import ProfileTab from './components/ProfileTab';
 import { playBeep } from './utils/audio';
+import { supabase } from './utils/supabaseClient';
 
 export default function App() {
   // Authentication State
@@ -169,22 +170,34 @@ export default function App() {
     localStorage.setItem('caninana_users_db', JSON.stringify(users));
   }, [users]);
 
-  // Fetch initial database state from Server
+  // Fetch initial database state from Supabase
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        const response = await fetch(getApiUrl('/api/db/load'));
-        const responseData = await response.json();
-        if (responseData.success && responseData.data) {
-          const db = responseData.data;
-          setProducts(db.products);
-          setMovements(db.movements);
-          setInventory(db.inventory);
-          setLogs(db.logs);
-          setUsers(db.users);
+        const { data: remoteProducts, error: prodErr } = await supabase.from('products').select('*');
+        if (!prodErr && remoteProducts) {
+          const parsedProducts: Product[] = remoteProducts.map(p => ({
+            barcode: p.barcode,
+            description: p.description,
+            category: p.category || '',
+            application: p.application || '',
+            stock: p.stock || 0,
+            minStock: p.min_stock || 3
+          }));
+          setProducts(parsedProducts);
+        }
+
+        const { data: remoteUsers, error: userErr } = await supabase.from('users').select('*');
+        if (!userErr && remoteUsers) {
+          setUsers(remoteUsers.map(u => ({
+            username: u.username,
+            name: u.name,
+            role: u.role as any,
+            email: u.email || ''
+          })));
         }
       } catch (err) {
-        console.error('Could not load database from server, using offline cached data instead', err);
+        console.error('Could not load database from Supabase, using offline cached data', err);
       }
     };
     loadInitialData();
@@ -198,9 +211,7 @@ export default function App() {
       // Trigger background auto sync if not simulated offline
       if (!isSimulatedOffline) {
         syncDataWithServer();
-        if (gasUrl) {
-          syncDataWithGAS();
-        }
+        syncDataWithSupabase();
       }
     };
     const handleOffline = () => {
@@ -316,7 +327,7 @@ export default function App() {
       
       // Auto trigger sync
       setTimeout(() => {
-        syncDataWithGAS();
+        syncDataWithSupabase();
       }, 500);
       
       return true;
@@ -377,9 +388,7 @@ export default function App() {
     if (!isSimulatedOffline && isOnline) {
       setTimeout(() => {
         syncDataWithServer();
-        if (gasUrl) {
-          syncDataWithGAS();
-        }
+        syncDataWithSupabase();
       }, 500);
     }
   };
@@ -411,9 +420,7 @@ export default function App() {
     if (!isSimulatedOffline && isOnline) {
       setTimeout(() => {
         syncDataWithServer();
-        if (gasUrl) {
-          syncDataWithGAS();
-        }
+        syncDataWithSupabase();
       }, 500);
     }
   };
@@ -490,19 +497,12 @@ export default function App() {
   };
 
 
-  // Bi-directional Sincronização with Google Sheets Apps Script Web App
-  const syncDataWithGAS = async () => {
+  // Bi-directional Sincronização with Supabase Cloud Database
+  const syncDataWithSupabase = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
 
-    // 1. Check if Google Apps Script URL is configured
-    if (!gasUrl) {
-      addLog('Configure a URL do Google Apps Script na aba Sinc. para habilitar sincronização em nuvem.', 'warning', currentUser?.username || 'Sistema');
-      setIsSyncing(false);
-      return;
-    }
-
-    // 2. Check if offline or simulated offline (Offline First Queue behavior)
+    // Check if offline or simulated offline
     if (isSimulatedOffline || !isOnline) {
       const pendingMovs = movements.filter((m) => !m.synced).length;
       const pendingInvs = inventory.filter((i) => !i.synced).length;
@@ -522,65 +522,125 @@ export default function App() {
     }
 
     try {
-      // Get unsynced movements, inventory items, and logs
-      const unsyncedMovements = movements.filter((m) => !m.synced);
-      const unsyncedInventory = inventory.filter((i) => !i.synced);
-      const unsyncedLogs = logs.filter((l) => l.id !== 'log_init'); // Sync new logs
-      
-      // Identify products registered offline that might not exist in Sheets yet
-      const sheetsBarcodeList = products.map((p) => p.barcode);
-      // Let's pass the offline ones
-      const newProducts = products.filter((p) => !INITIAL_PRODUCTS.some((ip) => ip.barcode === p.barcode));
-
-      const payload = {
-        action: 'sync',
-        payload: {
-          movements: unsyncedMovements,
-          inventory: unsyncedInventory,
-          logs: unsyncedLogs,
-          newProducts: newProducts
-        }
-      };
-
-      const response = await fetch(gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        mode: 'cors',
-        body: JSON.stringify(payload),
-      });
-
-      const responseData = await response.json();
-
-      if (responseData.success && responseData.data) {
-        const cloudData = responseData.data;
-
-        // Mark local items as successfully synced
-        setMovements((prev) => prev.map((m) => ({ ...m, synced: true })));
-        setInventory((prev) => prev.map((i) => ({ ...i, synced: true })));
-
-        // Merge products returned from Google Sheets to ensure synced values and stock
-        if (cloudData.products && cloudData.products.length > 0) {
-          // Map Sheets keys (which are headers) correctly
-          const parsedProducts: Product[] = cloudData.products.map((row: any) => ({
-            barcode: String(row.barcode || row.CÓDIGO_BARRAS || ''),
-            description: String(row.description || row.DESCRIÇÃO || ''),
-            category: String(row.category || row.CATEGORIA || ''),
-            application: String(row.application || row.APLICAÇÃO || ''),
-            stock: Number(row.stock || row.ESTOQUE || 0),
-            minStock: Number(row.minStock || row.ESTOQUE_MÍNIMO || 3)
-          }));
-          
-          setProducts(parsedProducts);
-        }
-
-        addLog(`Planilha Google Sheets sincronizada! Estoques e transações em nuvem atualizados.`, 'success', 'Sistema');
-        playBeep('success');
-      } else {
-        throw new Error(responseData.error || 'Erro retornado pelo Apps Script');
+      // 1. Sync pending system logs to Supabase
+      const unsyncedLogs = logs.filter((l) => l.id !== 'log_init');
+      if (unsyncedLogs.length > 0) {
+        const { error: logErr } = await supabase
+          .from('system_logs')
+          .upsert(
+            unsyncedLogs.map(l => ({
+              id: l.id,
+              timestamp: l.timestamp,
+              message: l.message,
+              type: l.type,
+              user: l.user
+            }))
+          );
+        if (logErr) console.error('Error syncing logs to Supabase:', logErr);
       }
+
+      // 2. Sync pending movements to Supabase
+      const unsyncedMovements = movements.filter((m) => !m.synced);
+      if (unsyncedMovements.length > 0) {
+        const { error: movErr } = await supabase
+          .from('movements')
+          .upsert(
+            unsyncedMovements.map(m => ({
+              id: m.id,
+              barcode: m.barcode,
+              type: m.type,
+              quantity: m.quantity,
+              origin_location: m.originLocation,
+              destination_location: m.destinationLocation,
+              date: m.date,
+              user: m.user
+            }))
+          );
+        if (movErr) throw movErr;
+        
+        // Update product stock counts for processed movements
+        for (const mov of unsyncedMovements) {
+          const change = mov.type === 'Entrada' ? mov.quantity : mov.type === 'Saída' ? -mov.quantity : 0;
+          if (change !== 0) {
+            const prod = products.find(p => p.barcode === mov.barcode);
+            if (prod) {
+              const newStock = Math.max(0, prod.stock + change);
+              await supabase
+                .from('products')
+                .update({ stock: newStock })
+                .eq('barcode', mov.barcode);
+            }
+          }
+        }
+      }
+
+      // 3. Sync pending inventory items to Supabase
+      const unsyncedInventory = inventory.filter((i) => !i.synced);
+      if (unsyncedInventory.length > 0) {
+        const { error: invErr } = await supabase
+          .from('inventory')
+          .insert(
+            unsyncedInventory.map(i => ({
+              barcode: i.barcode,
+              description: i.description,
+              counted_quantity: i.countedQuantity,
+              date: i.date,
+              user: i.user
+            }))
+          );
+        if (invErr) throw invErr;
+
+        // Sync local count to products stock count on cloud
+        for (const inv of unsyncedInventory) {
+          await supabase
+            .from('products')
+            .update({ stock: inv.countedQuantity })
+            .eq('barcode', inv.barcode);
+        }
+      }
+
+      // 4. Fetch the latest products from Supabase
+      const { data: remoteProducts, error: prodErr } = await supabase
+        .from('products')
+        .select('*');
+      
+      if (prodErr) throw prodErr;
+
+      if (remoteProducts) {
+        const parsedProducts: Product[] = remoteProducts.map(p => ({
+          barcode: p.barcode,
+          description: p.description,
+          category: p.category || '',
+          application: p.application || '',
+          stock: p.stock || 0,
+          minStock: p.min_stock || 3
+        }));
+        setProducts(parsedProducts);
+      }
+
+      // 5. Fetch users from Supabase to sync login database
+      const { data: remoteUsers, error: userErr } = await supabase
+        .from('users')
+        .select('*');
+      
+      if (!userErr && remoteUsers) {
+        setUsers(remoteUsers.map(u => ({
+          username: u.username,
+          name: u.name,
+          role: u.role as any,
+          email: u.email || ''
+        })));
+      }
+
+      // Mark all local items as successfully synced
+      setMovements((prev) => prev.map((m) => ({ ...m, synced: true })));
+      setInventory((prev) => prev.map((i) => ({ ...i, synced: true })));
+
+      addLog(`Supabase sincronizado! Estoques e transações em nuvem atualizados.`, 'success', 'Sistema');
+      playBeep('success');
     } catch (err: any) {
-      console.error('Spreadsheet sync failed:', err);
-      addLog(`Falha na sincronização em nuvem: ${err.message || 'Erro de rede ou CORS'}. Coletas salvas no smartphone em modo de contingência.`, 'error', 'Sistema');
+      console.error('Supabase sync failed:', err);
+      addLog(`Falha na sincronização do Supabase: ${err.message || 'Erro de rede'}. Coletas em contingência local.`, 'error', 'Sistema');
       playBeep('error');
     } finally {
       setIsSyncing(false);
@@ -654,7 +714,7 @@ export default function App() {
           {/* Sync status indicator action */}
           <button
             id="header-quick-sync"
-            onClick={syncDataWithGAS}
+            onClick={syncDataWithSupabase}
             disabled={isSyncing}
             className={`w-8 h-8 rounded-lg border border-white/20 bg-white/10 flex items-center justify-center text-white/90 hover:text-white hover:bg-white/20 cursor-pointer active:scale-95 transition ${
               isSyncing ? 'animate-spin border-white' : ''
@@ -732,7 +792,7 @@ export default function App() {
             logs={logs}
             user={currentUser}
             onClearDatabase={handleClearDatabase}
-            onSync={syncDataWithGAS}
+            onSync={syncDataWithSupabase}
             isSyncing={isSyncing}
           />
         )}
