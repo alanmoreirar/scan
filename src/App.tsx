@@ -238,7 +238,7 @@ export default function App() {
   };
 
   // Handle Profile Update
-  const handleUpdateProfile = (updatedFields: Partial<User & { passwordHash?: string }>) => {
+  const handleUpdateProfile = async (updatedFields: Partial<User & { passwordHash?: string }>) => {
     if (!currentUser) return;
     
     const { passwordHash, ...userFields } = updatedFields;
@@ -254,12 +254,31 @@ export default function App() {
       )
     );
     
+    if (isOnline && !isSimulatedOffline) {
+      try {
+        const updatePayload: any = {
+          name: updatedUser.name,
+          role: updatedUser.role,
+          email: updatedUser.email || ''
+        };
+        if (passwordHash) {
+          updatePayload.password_hash = passwordHash;
+        }
+        await supabase
+          .from('users')
+          .update(updatePayload)
+          .eq('username', currentUser.username);
+      } catch (e) {
+        console.error('Failed to sync profile update to Supabase:', e);
+      }
+    }
+    
     playBeep('success');
     addLog(`Perfil do operador @${currentUser.username} atualizado com sucesso.`, 'success', currentUser.username);
   };
 
   // Handle Admin updating other user profiles
-  const handleUpdateAnyUser = (username: string, updatedFields: Partial<User & { passwordHash?: string }>) => {
+  const handleUpdateAnyUser = async (username: string, updatedFields: Partial<User & { passwordHash?: string }>) => {
     setUsers((prevUsers) => 
       prevUsers.map((u) => 
         u.username === username 
@@ -276,13 +295,47 @@ export default function App() {
       localStorage.setItem('caninana_user', JSON.stringify(updatedUser));
     }
 
+    if (isOnline && !isSimulatedOffline) {
+      try {
+        const updatePayload: any = {};
+        if (updatedFields.name) updatePayload.name = updatedFields.name;
+        if (updatedFields.role) updatePayload.role = updatedFields.role;
+        if (updatedFields.email) updatePayload.email = updatedFields.email;
+        if (updatedFields.passwordHash) updatePayload.password_hash = updatedFields.passwordHash;
+
+        await supabase
+          .from('users')
+          .update(updatePayload)
+          .eq('username', username);
+      } catch (e) {
+        console.error('Failed to sync user profile update to Supabase:', e);
+      }
+    }
+
     playBeep('success');
     addLog(`Operador @${username} atualizado pelo administrador.`, 'success', currentUser?.username || 'admin');
   };
 
   // Handle Admin adding a new user profile
-  const handleAddUser = (newUser: User & { passwordHash: string }) => {
+  const handleAddUser = async (newUser: User & { passwordHash: string }) => {
     setUsers((prevUsers) => [...prevUsers, newUser]);
+
+    if (isOnline && !isSimulatedOffline) {
+      try {
+        await supabase
+          .from('users')
+          .insert({
+            username: newUser.username,
+            name: newUser.name,
+            role: newUser.role,
+            email: newUser.email || '',
+            password_hash: newUser.passwordHash
+          });
+      } catch (e) {
+        console.error('Failed to insert user profile to Supabase:', e);
+      }
+    }
+
     addLog(`Novo operador @${newUser.username} cadastrado no nível [${newUser.role}].`, 'success', currentUser?.username || 'admin');
   };
 
