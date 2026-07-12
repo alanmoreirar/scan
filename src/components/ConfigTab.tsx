@@ -32,8 +32,7 @@ interface ConfigTabProps {
   setGasUrl: (url: string) => void;
   backendUrl: string;
   setBackendUrl: (url: string) => void;
-  isSimulatedOffline: boolean;
-  setIsSimulatedOffline: (offline: boolean) => void;
+  isOnline: boolean;
   products: Product[];
   movements: Movement[];
   inventory: InventoryItem[];
@@ -49,8 +48,7 @@ export default function ConfigTab({
   setGasUrl,
   backendUrl,
   setBackendUrl,
-  isSimulatedOffline,
-  setIsSimulatedOffline,
+  isOnline,
   products,
   movements,
   inventory,
@@ -220,10 +218,10 @@ export default function ConfigTab({
           <div className="flex items-center justify-between text-xs py-1">
             <span className="text-slate-400 font-mono text-[10px] uppercase">Status de Rede:</span>
             <div className="flex items-center gap-1.5">
-              {isSimulatedOffline ? (
-                <span id="network-offline-status" className="text-amber-700 font-bold font-mono text-[10px] flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+              {!isOnline ? (
+                <span id="network-offline-status" className="text-red-700 font-bold font-mono text-[10px] flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-md border border-red-200">
                   <WifiOff size={12} />
-                  SIMULADO OFFLINE
+                  DISPOSITIVO OFFLINE
                 </span>
               ) : (
                 <span id="network-online-status" className="text-green-700 font-bold font-mono text-[10px] flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-md border border-green-200">
@@ -234,25 +232,7 @@ export default function ConfigTab({
             </div>
           </div>
 
-          {/* Simulated Offline Mode Switch */}
-          <div className="flex items-center justify-between bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl">
-            <div className="text-[11px] text-slate-500">
-              <strong className="text-slate-800 block font-mono text-[10px] uppercase">Simular Modo Offline</strong>
-              Acumula dados localmente para testar reconexão
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                id="offline-simulation-switch"
-                type="checkbox"
-                className="sr-only peer"
-                checked={isSimulatedOffline}
-                onChange={(e) => {
-                  setIsSimulatedOffline(e.target.checked);
-                }}
-              />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-            </label>
-          </div>
+
         </div>
       </div>
 

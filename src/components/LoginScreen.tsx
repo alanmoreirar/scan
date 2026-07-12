@@ -4,91 +4,169 @@
  */
 
 import React, { useState } from 'react';
-import { Shield, Key, UserCheck, AlertTriangle } from 'lucide-react';
+import { Shield, Key, UserCheck, AlertTriangle, UserPlus, ArrowLeft, Mail, Award } from 'lucide-react';
 import { User } from '../types';
-import { INITIAL_USERS } from '../initialData';
 import { playBeep } from '../utils/audio';
+import { supabase } from '../utils/supabaseClient';
 
 interface LoginScreenProps {
   onLogin: (user: User) => void;
   users?: (User & { passwordHash: string })[];
+  onAddUserLocal?: (newUser: User & { passwordHash: string }) => void;
 }
 
-export default function LoginScreen({ onLogin, users = INITIAL_USERS }: LoginScreenProps) {
+export default function LoginScreen({ onLogin, users = [], onAddUserLocal }: LoginScreenProps) {
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  
+  // Login form states
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  
+  // Register form states
+  const [regName, setRegName] = useState('');
+  const [regUsername, setRegUsername] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regRole, setRegRole] = useState<'Administrador' | 'Operador' | 'Consulta'>('Operador');
+  
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const adminUser = users.find(u => u.username === 'admin');
-  const operatorUser = users.find(u => u.username === 'operador');
-  const queryUser = users.find(u => u.username === 'consulta');
-
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const found = users.find(
-      (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.passwordHash === password
-    );
+    setError('');
+    setLoading(true);
 
-    if (found) {
-      setError('');
-      playBeep('success');
-      onLogin({
-        username: found.username,
-        name: found.name,
-        role: found.role,
-        email: found.email,
-        avatar: found.avatar,
-      });
-    } else {
-      setError('Usuário ou senha incorretos (Dica: use "admin", "operador" ou "consulta" com senha "123")');
-      playBeep('error');
-    }
-  };
+    const typedUser = username.trim().toLowerCase();
+    const typedPass = password;
 
-  const handleQuickLogin = (role: 'admin' | 'operador' | 'consulta') => {
-    const found = users.find((u) => u.username === role);
-    if (found) {
-      setError('');
-      playBeep('success');
-      onLogin({
-        username: found.username,
-        name: found.name,
-        role: found.role,
-        email: found.email,
-        avatar: found.avatar,
-      });
-    }
-  };
+    try {
+      // 1. Try to query directly from Supabase for real-time validation if online
+      const { data: remoteUser, error: queryErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', typedUser)
+        .single();
 
-  const renderQuickAvatar = (user: User | undefined) => {
-    if (!user) return null;
-    const initial = user.name ? user.name.substring(0, 1) : 'U';
-    
-    if (user.avatar) {
-      if (user.avatar.startsWith('linear-gradient')) {
-        return (
-          <div 
-            className="w-8 h-8 rounded-full mx-auto mb-1 flex items-center justify-center text-white font-bold text-[11px] uppercase shadow-inner"
-            style={{ background: user.avatar }}
-          >
-            {initial}
-          </div>
-        );
+      if (!queryErr && remoteUser) {
+        if (remoteUser.password_hash === typedPass) {
+          playBeep('success');
+          onLogin({
+            username: remoteUser.username,
+            name: remoteUser.name,
+            role: remoteUser.role,
+            email: remoteUser.email || '',
+            avatar: ''
+          });
+          setLoading(false);
+          return;
+        }
       }
-      return (
-        <img 
-          src={user.avatar} 
-          alt={user.name} 
-          className="w-8 h-8 rounded-full mx-auto mb-1 object-cover border border-slate-200 shadow-sm" 
-        />
+
+      // 2. Offline Contingency: Fallback to the local memory/cached users database
+      const found = users.find(
+        (u) => u.username.toLowerCase() === typedUser && u.passwordHash === typedPass
       );
+
+      if (found) {
+        playBeep('success');
+        onLogin({
+          username: found.username,
+          name: found.name,
+          role: found.role,
+          email: found.email,
+          avatar: found.avatar,
+        });
+      } else {
+        setError('Usuário ou senha incorretos.');
+        playBeep('error');
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Erro de conexão ou autenticação local.');
+    } finally {
+      setLoading(false);
     }
-    
-    return (
-      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-400 mx-auto mb-1 flex items-center justify-center font-bold text-[11px] uppercase font-mono">
-        {initial}
-      </div>
-    );
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    // Validations
+    if (!regName.trim() || !regUsername.trim() || !regPassword) {
+      setError('Por favor, preencha todos os campos obrigatórios.');
+      playBeep('error');
+      setLoading(false);
+      return;
+    }
+
+    if (regPassword !== regConfirmPassword) {
+      setError('As senhas digitadas não coincidem.');
+      playBeep('error');
+      setLoading(false);
+      return;
+    }
+
+    const cleanUsername = regUsername.trim().toLowerCase();
+
+    try {
+      // Insert new operator directly into Supabase
+      const { error: insertErr } = await supabase
+        .from('users')
+        .insert({
+          username: cleanUsername,
+          name: regName.trim(),
+          role: regRole,
+          email: regEmail.trim() || '',
+          password_hash: regPassword
+        });
+
+      if (insertErr) {
+        if (insertErr.code === '23505') {
+          throw new Error('Este nome de usuário já está cadastrado.');
+        }
+        throw insertErr;
+      }
+
+      // Append locally to keep local cached db synchronized
+      if (onAddUserLocal) {
+        onAddUserLocal({
+          username: cleanUsername,
+          name: regName.trim(),
+          role: regRole,
+          email: regEmail.trim(),
+          passwordHash: regPassword
+        });
+      }
+
+      playBeep('success');
+      setSuccess('Usuário cadastrado com sucesso! Faça seu login.');
+      
+      // Clear fields
+      setRegName('');
+      setRegUsername('');
+      setRegEmail('');
+      setRegPassword('');
+      setRegConfirmPassword('');
+      
+      // Switch back to Login screen after a short delay
+      setTimeout(() => {
+        setIsRegisterMode(false);
+        setSuccess('');
+      }, 1500);
+
+    } catch (err: any) {
+      console.error('Registration failed:', err);
+      setError(err.message || 'Erro ao registrar usuário no Supabase.');
+      playBeep('error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -98,113 +176,207 @@ export default function LoginScreen({ onLogin, users = INITIAL_USERS }: LoginScr
         <div className="absolute top-0 left-0 w-full h-1 bg-[#2497DE]"></div>
         
         {/* Header */}
-        <div className="text-center mb-8 mt-2">
-          <div className="mx-auto w-14 h-14 bg-[#2497DE]/10 border border-[#2497DE]/20 rounded-xl flex items-center justify-center mb-4">
+        <div className="text-center mb-6 mt-2">
+          <div className="mx-auto w-14 h-14 bg-[#2497DE]/10 border border-[#2497DE]/20 rounded-xl flex items-center justify-center mb-3">
             <span className="text-xl font-black text-[#2497DE] tracking-widest font-mono">CN</span>
           </div>
           <h1 className="text-xl font-bold text-slate-800 tracking-tight uppercase">Caninana Coletor</h1>
-          <p className="text-slate-400 text-[9px] font-bold font-mono uppercase tracking-wider mt-1">Coletor Profissional de Dados v2.5</p>
+          <p className="text-slate-400 text-[9px] font-bold font-mono uppercase tracking-wider mt-1">Coletor de Dados Oficial</p>
           <p className="text-[#2497DE] text-[10px] font-bold uppercase tracking-wider mt-0.5">Caninana Auto Vidros</p>
         </div>
 
-        {/* Login Form */}
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Usuário</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
-                <UserCheck size={16} />
-              </span>
+        {/* Dynamic Forms */}
+        {!isRegisterMode ? (
+          /* LOGIN FORM */
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Usuário / Login</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                  <UserCheck size={15} />
+                </span>
+                <input
+                  id="username-input"
+                  type="text"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Seu usuário"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Senha</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                  <Key size={15} />
+                </span>
+                <input
+                  id="password-input"
+                  type="password"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Sua senha"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div id="login-error" className="flex items-start gap-2 bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-xs leading-relaxed">
+                <AlertTriangle className="shrink-0 mt-0.5 text-red-500" size={15} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button
+              id="submit-login"
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#2497DE] hover:bg-[#1d7ebc] text-white py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-sm active:scale-98 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              <Shield size={14} />
+              {loading ? 'Autenticando...' : 'Autenticar Dispositivo'}
+            </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setError('');
+                  setIsRegisterMode(true);
+                }}
+                className="text-xs font-bold text-[#2497DE] hover:text-[#1d7ebc] font-sans flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+              >
+                <UserPlus size={14} />
+                Não tem conta? Cadastre-se
+              </button>
+            </div>
+          </form>
+        ) : (
+          /* REGISTRATION FORM */
+          <form onSubmit={handleRegister} className="space-y-3.5">
+            <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2 mb-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setError('');
+                  setIsRegisterMode(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <span className="text-xs font-bold text-slate-800 uppercase font-mono tracking-wider">Criar Novo Cadastro</span>
+            </div>
+
+            <div>
+              <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Nome Completo</label>
               <input
-                id="username-input"
                 type="text"
-                className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
-                placeholder="Ex: admin, operador, consulta"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                placeholder="Ex: Alan Moreira"
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
                 required
               />
             </div>
-          </div>
 
-          <div>
-            <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Senha</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
-                <Key size={16} />
-              </span>
-              <input
-                id="password-input"
-                type="password"
-                className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
-                placeholder="Digite a senha"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-          </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Usuário (Login)</label>
+                <input
+                  type="text"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Ex: alan.moreira"
+                  value={regUsername}
+                  onChange={(e) => setRegUsername(e.target.value)}
+                  required
+                />
+              </div>
 
-          {error && (
-            <div id="login-error" className="flex items-start gap-2 bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-xs leading-relaxed">
-              <AlertTriangle className="shrink-0 mt-0.5 text-red-500" size={15} />
-              <span>{error}</span>
+              <div>
+                <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Nível / Perfil</label>
+                <select
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-2 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none transition"
+                  value={regRole}
+                  onChange={(e) => setRegRole(e.target.value as any)}
+                >
+                  <option value="Operador">Operador (Coleta)</option>
+                  <option value="Administrador">Administrador</option>
+                  <option value="Consulta">Apenas Consulta</option>
+                </select>
+              </div>
             </div>
-          )}
 
-          <button
-            id="submit-login"
-            type="submit"
-            className="w-full bg-[#2497DE] hover:bg-[#1d7ebc] text-white py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-sm active:scale-98 cursor-pointer flex items-center justify-center gap-2"
-          >
-            <Shield size={14} />
-            Autenticar Dispositivo
-          </button>
-        </form>
+            <div>
+              <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">E-mail (Opcional)</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                  <Mail size={14} />
+                </span>
+                <input
+                  type="email"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Ex: alan@caninana.com"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                />
+              </div>
+            </div>
 
-        {/* Quick selection divider */}
-        <div className="my-6 flex items-center justify-between text-slate-400 text-[9px] uppercase font-bold font-mono">
-          <div className="h-px bg-slate-200 flex-grow mr-3"></div>
-          <span>Acesso Rápido de Testes</span>
-          <div className="h-px bg-slate-200 flex-grow ml-3"></div>
-        </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Definir Senha</label>
+                <input
+                  type="password"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Senha"
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  required
+                />
+              </div>
 
-        {/* Quick selection buttons */}
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            id="quick-login-admin"
-            onClick={() => handleQuickLogin('admin')}
-            className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-2.5 px-1 rounded-xl text-xs font-medium text-center transition cursor-pointer hover:border-[#2497DE]/50 flex flex-col items-center justify-between min-h-[84px]"
-          >
-            <div className="font-bold text-amber-600 mb-1 text-[8px] uppercase font-mono">Admin</div>
-            {renderQuickAvatar(adminUser)}
-            <div className="text-[10px] text-slate-600 font-bold truncate max-w-full px-0.5">
-              {adminUser ? adminUser.name.split(' ')[0] : 'Carlos'}
+              <div>
+                <label className="block text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-wider font-mono">Confirmar Senha</label>
+                <input
+                  type="password"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3 text-xs focus:border-[#2497DE] focus:bg-white focus:outline-none placeholder-slate-400 transition"
+                  placeholder="Repita a senha"
+                  value={regConfirmPassword}
+                  onChange={(e) => setRegConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
             </div>
-          </button>
-          <button
-            id="quick-login-operator"
-            onClick={() => handleQuickLogin('operador')}
-            className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-2.5 px-1 rounded-xl text-xs font-medium text-center transition cursor-pointer hover:border-[#2497DE]/50 flex flex-col items-center justify-between min-h-[84px]"
-          >
-            <div className="font-bold text-[#2497DE] mb-1 text-[8px] uppercase font-mono">Operador</div>
-            {renderQuickAvatar(operatorUser)}
-            <div className="text-[10px] text-slate-600 font-bold truncate max-w-full px-0.5">
-              {operatorUser ? operatorUser.name.split(' ')[0] : 'Thiago'}
-            </div>
-          </button>
-          <button
-            id="quick-login-query"
-            onClick={() => handleQuickLogin('consulta')}
-            className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-2.5 px-1 rounded-xl text-xs font-medium text-center transition cursor-pointer hover:border-[#2497DE]/50 flex flex-col items-center justify-between min-h-[84px]"
-          >
-            <div className="font-bold text-emerald-600 mb-1 text-[8px] uppercase font-mono">Consulta</div>
-            {renderQuickAvatar(queryUser)}
-            <div className="text-[10px] text-slate-600 font-bold truncate max-w-full px-0.5">
-              {queryUser ? queryUser.name.split(' ')[0] : 'Juliana'}
-            </div>
-          </button>
-        </div>
+
+            {error && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-100 text-red-600 p-2.5 rounded-xl text-[11px] leading-relaxed">
+                <AlertTriangle className="shrink-0 mt-0.5 text-red-500" size={14} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {success && (
+              <div className="bg-green-50 border border-green-150 text-green-700 p-2.5 rounded-xl text-[11px] font-semibold text-center">
+                {success}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#2497DE] hover:bg-[#1d7ebc] text-white py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-sm active:scale-98 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              <UserPlus size={14} />
+              {loading ? 'Cadastrando...' : 'Finalizar Cadastro'}
+            </button>
+          </form>
+        )}
 
         {/* Footer info */}
         <div className="text-center mt-6 text-slate-400 text-[9px] font-mono leading-relaxed uppercase">

@@ -131,9 +131,7 @@ export default function App() {
     return path;
   };
 
-  const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(() => {
-    return localStorage.getItem('caninana_simulated_offline') === 'true';
-  });
+  const isSimulatedOffline = false;
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -162,9 +160,7 @@ export default function App() {
     localStorage.setItem('caninana_gas_url', gasUrl);
   }, [gasUrl]);
 
-  useEffect(() => {
-    localStorage.setItem('caninana_simulated_offline', String(isSimulatedOffline));
-  }, [isSimulatedOffline]);
+
 
   useEffect(() => {
     localStorage.setItem('caninana_users_db', JSON.stringify(users));
@@ -702,7 +698,7 @@ export default function App() {
 
   // Route to Login Screen if not authenticated
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} users={users} />;
+    return <LoginScreen onLogin={handleLogin} users={users} onAddUserLocal={handleAddUser} />;
   }
 
   return (
@@ -837,8 +833,7 @@ export default function App() {
             setGasUrl={setGasUrl}
             backendUrl={backendUrl}
             setBackendUrl={setBackendUrl}
-            isSimulatedOffline={isSimulatedOffline}
-            setIsSimulatedOffline={setIsSimulatedOffline}
+            isOnline={isOnline}
             products={products}
             movements={movements}
             inventory={inventory}
